@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<!--
+  Production Frontend Enhancement v2.0
+  
+  Changes:
+  - Added Lucide icons CDN for professional iconography
+  - Enhanced accessibility: ARIA labels, roles, semantic HTML5
+  - Added "Since" filter for History/Insights with quick presets
+  - Added client-side pagination for History and Memories
+  - Improved keyboard navigation and focus management
+  - Refined visual hierarchy and spacing
+  - All existing features preserved with zero API contract changes
+  
+  Tech: Vanilla HTML/CSS/JS + Chart.js 4 + Lucide Icons
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="AI-powered emotion analysis from text and speech with personalized insights" />
+  <title>Intelligent Emotion System</title>
+  <link rel="stylesheet" href="styles.css" />
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+</head>
+<body>
+  <div class="container">
+    <header role="banner">
+      <h1>
+        <i data-lucide="brain" aria-hidden="true"></i>
+        Intelligent Emotion System
+      </h1>
+      <p class="subtitle">Analyze emotions from speech and text using AI</p>
+      
+    </header>
+
+    <main role="main">
+      <!-- User Panel -->
+      <section class="user-section" aria-labelledby="user-section-heading">
+        <h2 id="user-section-heading">
+          <i data-lucide="user" aria-hidden="true"></i>
+          User Profile
+        </h2>
+        <form class="user-form" id="user-form" onsubmit="return false;">
+          <div class="form-grid">
+            <div class="input-group">
+              <label for="user-panel-id">User ID <span class="required" aria-label="required">*</span></label>
+              <input type="text" id="user-panel-id" placeholder="e.g., U001" required aria-required="true" />
+            </div>
+            <div class="input-group">
+              <label for="user-panel-name">Name</label>
+              <input type="text" id="user-panel-name" placeholder="Your name" />
+            </div>
+            <div class="input-group">
+              <label for="user-panel-style">Interaction Style</label>
+                <select id="user-panel-style" name="interaction_style">
+                  <option value="" selected>Choose interaction type…</option>
+                  <option value="supportive">Supportive</option>
+                  <option value="concise">Concise</option>
+                  <option value="encouraging">Encouraging</option>
+                  <option value="practical">Practical</option>
+                  <option value="reflective">Reflective</option>
+                  <option value="coach">Coach</option>
+                </select>
+            </div>
+            <div class="input-group">
+              <label for="user-panel-preferences">Preferences</label>
+              <input type="text" id="user-panel-preferences" placeholder="Comma-separated tags" />
+            </div>
+          </div>
+          <div class="button-group">
+            <button type="button" class="btn btn-primary btn-small" id="user-save" aria-label="Save user profile">
+              <i data-lucide="save" aria-hidden="true"></i>
+              Save User
+            </button>
+            <button type="button" class="btn btn-secondary btn-small" id="user-load" aria-label="Load user profile">
+              <i data-lucide="download" aria-hidden="true"></i>
+              Load User
+            </button>
+          </div>
+        </form>
+        <div id="user-panel-status" class="status-message" role="status" aria-live="polite"></div>
+      </section>
+      <!-- Input Section -->
+      <section class="input-section" aria-labelledby="analysis-section-heading">
+        <h2 id="analysis-section-heading" class="sr-only">Emotion Analysis</h2>
+        <div class="tabs" role="tablist" aria-label="Analysis input method">
+          <button class="tab active" role="tab" data-tab="text" aria-selected="true" aria-controls="text-panel" id="text-tab">
+            <i data-lucide="type" aria-hidden="true"></i>
+            Text Input
+          </button>
+          <button class="tab" role="tab" data-tab="speech" aria-selected="false" aria-controls="speech-panel" id="speech-tab">
+            <i data-lucide="mic" aria-hidden="true"></i>
+            Voice Input
+          </button>
+        </div>
+
+        <!-- Text Input Panel -->
+        <div class="tab-content active" id="text-panel" role="tabpanel" aria-labelledby="text-tab">
+          <form id="text-form" onsubmit="return false;">
+            <div class="input-group">
+              <label for="user-id-text">User ID</label>
+              <input type="text" id="user-id-text" placeholder="e.g., U001" autocomplete="username" />
+            </div>
+            <div class="input-group">
+              <label for="text-input">Enter your message <span class="required" aria-label="required">*</span></label>
+              <textarea 
+                id="text-input" 
+                rows="4" 
+                placeholder="I am feeling happy today..."
+                required
+                aria-required="true"
+              ></textarea>
+              <span class="input-hint">Express how you're feeling in your own words</span>
+            </div>
+            <button type="button" class="btn btn-primary" id="analyze-text" aria-label="Analyze text emotion">
+              <i data-lucide="sparkles" aria-hidden="true"></i>
+              Analyze Text
+            </button>
+          </form>
+        </div>
+
+        <!-- Speech Input Panel -->
+        <div class="tab-content" id="speech-panel" role="tabpanel" aria-labelledby="speech-tab">
+          <div class="input-group">
+            <label for="user-id-speech">User ID</label>
+            <input type="text" id="user-id-speech" placeholder="e.g., U001" autocomplete="username" />
+          </div>
+          <div class="input-group">
+            <label for="speech-transcript">Transcribed Text</label>
+            <input type="text" id="speech-transcript" placeholder="Transcribed speech will appear here" aria-label="Transcribed speech" />
+          </div>
+          <div class="recorder" role="region" aria-labelledby="recorder-heading">
+            <h3 id="recorder-heading" class="sr-only">Audio Recorder</h3>
+            <div class="recorder-status" id="recorder-status" role="status" aria-live="polite">
+              <span class="status-indicator" aria-hidden="true"></span>
+              <span class="status-text">Ready to record</span>
+            </div>
+            <div class="button-group">
+              <button class="btn btn-record" id="record-btn" aria-label="Start recording">
+                <i data-lucide="mic" aria-hidden="true"></i>
+                Start Recording
+              </button>
+              <button class="btn btn-secondary" id="upload-btn" style="display:none;" aria-label="Upload and analyze recording">
+                <i data-lucide="upload" aria-hidden="true"></i>
+                Upload & Analyze
+              </button>
+            </div>
+            <div class="file-upload-section">
+              <input type="file" id="audio-file" accept="audio/*" style="display:none;" aria-label="Choose audio file" />
+              <button class="btn btn-outline btn-small" id="choose-file-btn" aria-label="Choose audio file from device">
+                <i data-lucide="folder-open" aria-hidden="true"></i>
+                Choose Audio File
+              </button>
+              <button class="btn btn-primary btn-small" id="analyze-file-btn" style="display:none;" aria-label="Analyze selected audio file">
+                <i data-lucide="sparkles" aria-hidden="true"></i>
+                Analyze File
+              </button>
+              <span id="file-name" class="file-name"></span>
+            </div>
+          </div>
+          <div class="audio-preview" id="audio-preview" style="display:none;" role="region" aria-labelledby="preview-heading">
+            <h4 id="preview-heading" class="sr-only">Audio Preview</h4>
+            <audio id="audio-playback" controls aria-label="Audio playback"></audio>
+          </div>
+        </div>
+      </section>
+
+      <!-- Result Section -->
+      <section class="result-section" id="result-section" style="display:none;" role="region" aria-labelledby="result-heading" aria-live="polite">
+        <h2 id="result-heading">Analysis Result</h2>
+        <div class="result-card">
+          <div class="emotion-display">
+            <div class="emotion-emoji" id="emotion-emoji" role="img" aria-label="Emotion icon">😊</div>
+            <div class="emotion-details">
+              <h3 class="emotion-label" id="emotion-label">Joy</h3>
+              <div class="emotion-chips" id="emotion-chips"></div>
+              <div class="confidence-bar" id="confidence-bar-single" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100" aria-label="Confidence level">
+                <div class="confidence-fill" id="confidence-fill"></div>
+              </div>
+              <div class="confidence-bar-dual" id="confidence-bar-dual" style="display:none;" role="progressbar" aria-label="Mixed emotion confidence levels">
+                <div class="confidence-segment confidence-segment-primary" id="confidence-segment-1"></div>
+                <div class="confidence-segment confidence-segment-secondary" id="confidence-segment-2"></div>
+              </div>
+              <p class="confidence-text" id="confidence-text">Confidence: 95%</p>
+            </div>
+          </div>
+          <div class="result-meta" id="result-meta"></div>
+        </div>
+      </section>
+
+      <!-- Adaptive Response Section -->
+      <section class="response-section" id="response-section" style="display:none;" role="region" aria-labelledby="response-heading">
+        <h2 id="response-heading">Adaptive Response</h2>
+        <div class="response-card">
+          <div class="response-icon" aria-hidden="true">
+            <i data-lucide="message-circle"></i>
+          </div>
+          <p class="response-text" id="response-text" role="status"></p>
+          <div class="button-group">
+            <button class="btn btn-secondary btn-small" id="get-response" aria-label="Get personalized response">
+              <i data-lucide="sparkles" aria-hidden="true"></i>
+              Get Personalized Response
+            </button>
+            <button class="btn btn-outline btn-small" id="speak-response" aria-label="Speak response aloud">
+              <i data-lucide="volume-2" aria-hidden="true"></i>
+              Speak Response
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- History Section -->
+      <section class="history-section" aria-labelledby="history-section-heading">
+        <div class="section-header">
+          <h2 id="history-section-heading">
+            <i data-lucide="bar-chart-2" aria-hidden="true"></i>
+            Emotion History
+          </h2>
+          <div class="history-controls">
+            <div class="input-group compact">
+              <label for="history-user-id" class="sr-only">User ID for history</label>
+              <input type="text" id="history-user-id" placeholder="User ID" aria-label="User ID" />
+            </div>
+            <div class="input-group compact">
+              <label for="history-since" class="sr-only">Filter since date</label>
+              <select id="history-since" aria-label="Time range filter">
+                <option value="">All time</option>
+                <option value="7">Last 7 days</option>
+                <option value="30">Last 30 days</option>
+                <option value="90">Last 90 days</option>
+              </select>
+            </div>
+            <button class="btn btn-primary btn-small" id="load-history" aria-label="Load emotion history">
+              <i data-lucide="refresh-cw" aria-hidden="true"></i>
+              Load History
+            </button>
+            <button class="btn btn-outline btn-small" id="export-csv" aria-label="Export history as CSV">
+              <i data-lucide="download" aria-hidden="true"></i>
+              Export CSV
+            </button>
+          </div>
+        </div>
+        <div class="chart-container" role="img" aria-label="Emotion distribution chart">
+          <canvas id="emotion-chart"></canvas>
+        </div>
+        <div class="chart-container" role="img" aria-label="Emotion timeline chart">
+          <canvas id="emotion-timeline"></canvas>
+        </div>
+        <div class="insights-row" id="insights-row" role="region" aria-labelledby="insights-heading">
+          <h3 id="insights-heading" class="sr-only">Emotion Insights</h3>
+          <div class="insight-chip" role="status">
+            <i data-lucide="hash" aria-hidden="true"></i>
+            <span class="insight-label">Total</span>
+            <span class="insight-value" id="insight-total" aria-label="Total emotion count">-</span>
+          </div>
+          <div class="insight-chip" role="status">
+            <i data-lucide="trophy" aria-hidden="true"></i>
+            <span class="insight-label">Top Emotion</span>
+            <span class="insight-value" id="insight-top" aria-label="Most frequent emotion">-</span>
+          </div>
+          <div class="insight-chip" role="status">
+            <i data-lucide="smile" aria-hidden="true"></i>
+            <span class="insight-label">Positive</span>
+            <span class="insight-value" id="insight-pos" aria-label="Positive emotion percentage">-</span>
+          </div>
+          <div class="insight-chip" role="status">
+            <i data-lucide="frown" aria-hidden="true"></i>
+            <span class="insight-label">Negative</span>
+            <span class="insight-value" id="insight-neg" aria-label="Negative emotion percentage">-</span>
+          </div>
+          <div class="insight-chip" role="status">
+            <i data-lucide="meh" aria-hidden="true"></i>
+            <span class="insight-label">Neutral</span>
+            <span class="insight-value" id="insight-neu" aria-label="Neutral emotion percentage">-</span>
+          </div>
+        </div>
+        <div class="history-table-container">
+          <table class="history-table" id="history-table" role="table" aria-label="Emotion history data">
+            <thead>
+              <tr>
+                <th scope="col">Time</th>
+                <th scope="col">Message</th>
+                <th scope="col">Emotion</th>
+                <th scope="col">Confidence</th>
+              </tr>
+            </thead>
+            <tbody id="history-body">
+              <tr>
+                <td colspan="4" class="empty-state">No history data. Enter a User ID and click Load History.</td>
+              </tr>
+            </tbody>
+          </table>
+          <div class="pagination" id="history-pagination" style="display:none;" role="navigation" aria-label="History pagination">
+            <button class="btn btn-outline btn-small" id="history-prev" aria-label="Previous page" disabled>
+              <i data-lucide="chevron-left" aria-hidden="true"></i>
+              Previous
+            </button>
+            <span class="pagination-info" id="history-page-info" aria-live="polite">Page 1</span>
+            <button class="btn btn-outline btn-small" id="history-next" aria-label="Next page" disabled>
+              Next
+              <i data-lucide="chevron-right" aria-hidden="true"></i>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Memories Section -->
+      <section class="history-section" aria-labelledby="memories-section-heading">
+        <div class="section-header">
+          <h2 id="memories-section-heading">
+            <i data-lucide="brain" aria-hidden="true"></i>
+            Memories
+          </h2>
+          <div class="history-controls">
+            <div class="input-group compact">
+              <label for="memory-type" class="sr-only">Memory type</label>
+              <input type="text" id="memory-type" placeholder="Type (e.g., note)" aria-label="Memory type" />
+            </div>
+            <div class="input-group compact">
+              <label for="memory-content" class="sr-only">Memory content</label>
+              <input type="text" id="memory-content" placeholder="Content" aria-label="Memory content" required />
+            </div>
+            <div class="input-group compact">
+              <label for="memory-importance" class="sr-only">Memory importance</label>
+              <select id="memory-importance" aria-label="Memory importance level">
+                <option value="normal" selected>Normal</option>
+                <option value="high">High</option>
+                <option value="low">Low</option>
+              </select>
+            </div>
+            <button class="btn btn-primary btn-small" id="save-memory" aria-label="Save memory">
+              <i data-lucide="plus" aria-hidden="true"></i>
+              Save Memory
+            </button>
+            <button class="btn btn-outline btn-small" id="load-memories" aria-label="Refresh memories list">
+              <i data-lucide="refresh-cw" aria-hidden="true"></i>
+              Refresh
+            </button>
+          </div>
+        </div>
+        <div class="history-table-container">
+          <table class="history-table" role="table" aria-label="Saved memories">
+            <thead>
+              <tr>
+                <th scope="col">Time</th>
+                <th scope="col">Type</th>
+                <th scope="col">Importance</th>
+                <th scope="col">Content</th>
+              </tr>
+            </thead>
+            <tbody id="memory-body">
+              <tr>
+                <td colspan="4" class="empty-state">No memories yet. Add one above.</td>
+              </tr>
+            </tbody>
+          </table>
+          <div class="pagination" id="memory-pagination" style="display:none;" role="navigation" aria-label="Memory pagination">
+            <button class="btn btn-outline btn-small" id="memory-prev" aria-label="Previous page" disabled>
+              <i data-lucide="chevron-left" aria-hidden="true"></i>
+              Previous
+            </button>
+            <span class="pagination-info" id="memory-page-info" aria-live="polite">Page 1</span>
+            <button class="btn btn-outline btn-small" id="memory-next" aria-label="Next page" disabled>
+              Next
+              <i data-lucide="chevron-right" aria-hidden="true"></i>
+            </button>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer role="contentinfo">
+      <p>Powered by FastAPI + MongoDB | Built with ❤️</p>
+    </footer>
+  </div>
+
+  <!-- Loading Overlay -->
+  <div class="loading-overlay" id="loading-overlay" role="alert" aria-live="assertive" aria-label="Loading">
+    <div class="spinner" aria-hidden="true"></div>
+    <p>Processing...</p>
+  </div>
+
+  <!-- Toast Notifications -->
+  <div class="toast-container" id="toast-container" aria-live="polite" aria-atomic="true"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script src="app.js"></script>
+  <script>
+    // Initialize Lucide icons after DOM load
+    document.addEventListener('DOMContentLoaded', () => {
+      if (typeof lucide !== 'undefined') {
+        lucide.createIcons();
+      }
+    });
+  </script>
+</body>
+</html>
