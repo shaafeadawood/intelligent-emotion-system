@@ -1,11 +1,20 @@
 import os
+# Load environment variables from .env so OPENAI_API_KEY and others are available
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except Exception:
+    pass
 from datetime import datetime
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 import tempfile
-import soundfile as sf
+try:
+    import soundfile as sf  # optional; used only for duration if available
+except Exception:
+    sf = None
 from datetime import timedelta
 
 import logging
@@ -89,88 +98,87 @@ async def predict_text(req: TextRequest, all_scores: bool = False):
 async def predict_speech(
     user_id: str | None = Form(None),
     client_time: str | None = Form(None),
-    file: UploadFile | None = File(None),
-    audio: UploadFile | None = File(None)
+    audio: UploadFile = File(...)
 ):
-    """Accepts an uploaded audio file, makes a simple transcript placeholder,
-    predicts emotion using the text pipeline, and logs to MongoDB."""
-    # Save uploaded file to a temp file
+    """Accept an uploaded audio file, transcribe with Whisper (OpenAI if available; local fallback),
+    predict emotion using text pipeline, and log to MongoDB. Clean, byte-based handling.
+    """
     try:
-        # Detect suffix from upload content type or filename so Whisper can decode
-        if file and getattr(file, 'content_type', None):
-            ct = file.content_type.lower()
-        elif audio and getattr(audio, 'content_type', None):
-            ct = audio.content_type.lower()
-        else:
-            ct = ''
+        # Read raw bytes once
+        audio_bytes = await audio.read()
+        if not audio_bytes:
+            raise HTTPException(status_code=400, detail="empty audio upload")
 
-        fname = (file or audio).filename if (file or audio) else ''
-        lower_name = (fname or '').lower()
-        if '.wav' in lower_name or 'wav' in ct:
-            suffix = '.wav'
-        elif '.ogg' in lower_name or 'ogg' in ct:
-            suffix = '.ogg'
-        elif '.m4a' in lower_name or 'm4a' in ct:
-            suffix = '.m4a'
-        elif '.mp3' in lower_name or 'mp3' in ct:
-            suffix = '.mp3'
-        else:
-            suffix = '.webm'
-        upload = file or audio
-        if upload is None:
-            raise HTTPException(status_code=400, detail="audio file is required (field 'file' or 'audio')")
+        filename = audio.filename or "recording"
+        content_type = (audio.content_type or "").lower()
+        logger.info(f"/predict-speech received file name={filename} content_type={content_type} size={len(audio_bytes)}")
 
-        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-            content = await upload.read()
-            tmp.write(content)
-            tmp_path = tmp.name
-        logger.info(f"/predict-speech received file name={upload.filename} content_type={getattr(upload,'content_type',None)} saved_as={tmp_path}")
-        # Try to read duration using soundfile
-        try:
-            info = sf.info(tmp_path)
-            duration = float(info.frames) / float(info.samplerate) if info.samplerate else 0.0
-        except Exception:
-            duration = None
-
-        # Try real transcription (whisper) first
-        try:
-            transcript_text = transcribe(tmp_path)
-            # basic cleanup: collapse whitespace & remove common fillers
-            t = (transcript_text or '').strip()
-            t = ' '.join(t.split())
-            fillers = ["uh", "umm", "um", "er", "ah", "like", "you know"]
-            for f in fillers:
-                t = t.replace(f + ' ', '').replace(' ' + f + ' ', ' ').replace(' ' + f, ' ')
-            transcript = t.strip()
-            if not transcript:
-                transcript = (f"[audio file: {audio.filename} | duration: {duration:.1f}s]" if duration else f"[audio file: {audio.filename}]")
-        except Exception as e:
-            logger.warning(f"Primary transcription failed: {e}")
-            # If Whisper failed (often due to container/codec), try ffmpeg to convert to wav then transcribe
+        # Duration (best-effort) via soundfile on bytes
+        duration = None
+        if sf is not None:
             try:
-                import subprocess, os
-                conv_path = tmp_path + ".wav"
-                # Attempt conversion: mono 16kHz WAV for reliable decoding
-                subprocess.run([
-                    'ffmpeg', '-y', '-i', tmp_path, '-ar', '16000', '-ac', '1', conv_path
-                ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                transcript_text = transcribe(conv_path)
-                t = (transcript_text or '').strip()
-                t = ' '.join(t.split())
-                fillers = ["uh", "umm", "um", "er", "ah", "like", "you know"]
-                for f in fillers:
-                    t = t.replace(f + ' ', '').replace(' ' + f + ' ', ' ').replace(' ' + f, ' ')
-                transcript = t.strip() or f"[audio file: {upload.filename}]"
-                try:
-                    if os.path.exists(conv_path):
-                        os.remove(conv_path)
-                except Exception:
-                    pass
-            except Exception as e2:
-                logger.error(f"Fallback ffmpeg+transcribe failed: {e2}")
-                transcript = f"[audio file: {upload.filename} | duration: {duration:.1f}s]" if duration else f"[audio file: {upload.filename}]"
+                # soundfile requires a path or file-like; use NamedTemporaryFile only for duration probe
+                with tempfile.NamedTemporaryFile(delete=True, suffix=".bin") as tmp:
+                    tmp.write(audio_bytes)
+                    tmp.flush()
+                    info = sf.info(tmp.name)
+                    duration = float(info.frames) / float(info.samplerate) if info.samplerate else None
+            except Exception:
+                duration = None
 
-        # Use detailed scores to improve accuracy for multi-sentence transcripts
+        # Transcription path: prefer OpenAI Whisper API if OPENAI_API_KEY is set; else local whisper
+        transcript = ""
+        used_fallback = False
+
+        try:
+            api_key = os.environ.get("OPENAI_API_KEY")
+            if api_key:
+                try:
+                    from openai import OpenAI
+                    client = OpenAI(api_key=api_key)
+                    # Build a file-like tuple: (filename, bytes)
+                    resp = client.audio.transcriptions.create(
+                        model="whisper-1",
+                        file=(filename, audio_bytes)
+                    )
+                    transcript = (getattr(resp, "text", None) or "").strip()
+                except Exception as e_api:
+                    logger.warning(f"OpenAI Whisper API transcription failed: {e_api}")
+            if not transcript:
+                # Local whisper fallback using our speech_model.transcribe which expects a path; write temp wav via ffmpeg for robustness
+                import subprocess
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".webm") as tmp_in:
+                    tmp_in.write(audio_bytes)
+                    tmp_in_path = tmp_in.name
+                try:
+                    conv_path = tmp_in_path + ".wav"
+                        subprocess.run([
+                            'ffmpeg', '-hide_banner', '-loglevel', 'error', '-nostdin',
+                            '-y', '-i', tmp_in_path, '-ar', '16000', '-ac', '1', '-c:a', 'pcm_s16le', conv_path
+                    ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    transcript_text = transcribe(conv_path)
+                    transcript = (transcript_text or "").strip()
+                    used_fallback = True
+                finally:
+                    try:
+                        os.path.exists(tmp_in_path) and os.remove(tmp_in_path)
+                        os.path.exists(conv_path) and os.remove(conv_path)
+                    except Exception:
+                        pass
+        except Exception as e_trans:
+            logger.error(f"Transcription pipeline failed: {e_trans}")
+
+        # Cleanup and normalize transcript
+        t = ' '.join((transcript or '').split())
+        fillers = ["uh", "umm", "um", "er", "ah", "like", "you know"]
+        for f in fillers:
+            t = t.replace(f + ' ', ' ').replace(' ' + f + ' ', ' ').replace(' ' + f, ' ')
+        transcript = t.strip()
+
+        if not transcript:
+            raise HTTPException(status_code=422, detail="transcription empty; please try again with clearer audio")
+
+        # Emotion prediction
         try:
             label, confidence, scores = predict_with_scores(transcript)
         except Exception:
@@ -186,7 +194,7 @@ async def predict_speech(
                 "input_content": transcript,
                 "detected_emotion": label,
                 "confidence": float(confidence),
-                "metadata": {"filename": upload.filename, "duration": duration},
+                "metadata": {"filename": filename, "duration": duration, "content_type": content_type},
                 "timestamp": datetime.utcnow(),
                 "client_time": client_time
             }
@@ -194,28 +202,30 @@ async def predict_speech(
             logger.info(f"Logged speech interaction user_id={user_id} emotion={label} confidence={confidence}")
         except Exception:
             pass
-        out = {"emotion": label, "confidence": float(confidence), "transcript": transcript, "duration": duration, "user_id": user_id}
+
+        out = {
+            "emotion": label,
+            "confidence": float(confidence),
+            "transcript": transcript,
+            "duration": duration,
+            "user_id": user_id
+        }
         if scores:
-            # include top-2 for UI mixed emotion visualization
             top2 = sorted(scores.items(), key=lambda x: x[1], reverse=True)[:2]
             out["scores"] = scores
             out["top"] = top2
-        # Attach a minimal diagnostics hint (non-breaking)
         out["_diag"] = {
-            "file": getattr(upload, 'filename', None),
-            "content_type": getattr(upload, 'content_type', None),
+            "file": filename,
+            "content_type": content_type,
             "duration": duration,
-            "used_fallback": not (scores is not None)
+            "used_fallback": used_fallback
         }
         return out
-    finally:
-        # clean up temp file if exists
-        try:
-            import os
-            if 'tmp_path' in locals() and os.path.exists(tmp_path):
-                os.remove(tmp_path)
-        except Exception:
-            pass
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"/predict-speech error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/respond")

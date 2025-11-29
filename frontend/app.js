@@ -3,10 +3,15 @@
 const API_BASE_URL = (() => {
   try {
     if (location.protocol === 'http:' || location.protocol === 'https:') {
+      // If frontend is served on a dev port (e.g., 3000), point to backend port 8000
+      const url = new URL(location.href);
+      if (url.port === '3000') {
+        return 'http://127.0.0.1:8000';
+      }
       return `${location.origin}`;
     }
   } catch {}
-  return 'http://localhost:8000';
+  return 'http://127.0.0.1:8000';
 })();
 
 // Emotion to Emoji Mapping
@@ -227,12 +232,19 @@ async function startRecording() {
     audioChunks = [];
     
     mediaRecorder.ondataavailable = (event) => {
-      audioChunks.push(event.data);
+      if (event && event.data && event.data.size > 0) {
+        audioChunks.push(event.data);
+      }
     };
     
     mediaRecorder.onstop = () => {
       const blobType = mediaRecorder.mimeType || (audioChunks[0] && audioChunks[0].type) || 'audio/webm';
-      recordedBlob = new Blob(audioChunks, { type: blobType });
+      try {
+        recordedBlob = new Blob(audioChunks, { type: blobType });
+      } catch (e) {
+        // Fallback without type
+        recordedBlob = new Blob(audioChunks);
+      }
       displayAudioPreview(recordedBlob);
       stream.getTracks().forEach(track => track.stop());
     };
@@ -254,9 +266,27 @@ async function startRecording() {
   }
 }
 
-function stopRecording() {
+async function stopRecording() {
   if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+    // Wait for onstop to finalize blob creation
+    const stopPromise = new Promise((resolve) => {
+      const originalOnStop = mediaRecorder.onstop;
+      mediaRecorder.onstop = (e) => {
+        try {
+          if (typeof originalOnStop === 'function') originalOnStop(e);
+        } finally {
+          resolve();
+        }
+      };
+    });
     mediaRecorder.stop();
+    await stopPromise;
+
+    // If we somehow collected no data, notify the user
+    if (!recordedBlob || (recordedBlob.size || 0) === 0) {
+      showToast('Recorded audio seems empty. Try again or select a file.', 'warning');
+    }
+
     updateRecorderStatus(false);
     recordBtn.innerHTML = '<i data-lucide="mic"></i> Start Recording';
     recordBtn.classList.remove('recording');
@@ -283,12 +313,40 @@ function updateRecorderStatus(recording) {
   }
 }
 
-function displayAudioPreview(blob) {
+async function displayAudioPreview(blob) {
   const audioPreview = document.getElementById('audio-preview');
   const audioPlayback = document.getElementById('audio-playback');
   
+  // Try decoding to verify the blob actually contains audio frames
+  let decodable = true;
+  try {
+    const arrBuf = await blob.arrayBuffer();
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (AudioCtx) {
+      const ctx = new AudioCtx();
+      await ctx.decodeAudioData(arrBuf.slice(0));
+      ctx.close && ctx.close();
+    }
+  } catch (e) {
+    decodable = false;
+  }
+
   const url = URL.createObjectURL(blob);
+  audioPlayback.srcObject = null;
   audioPlayback.src = url;
+  audioPlayback.volume = 1.0;
+  audioPlayback.muted = false;
+  // Ensure the element reloads the new source and attempt to play
+  try {
+    audioPlayback.load();
+    if (decodable) {
+      // Some browsers block autoplay; we ignore rejection
+      audioPlayback.play().catch(() => {});
+    }
+  } catch {}
+  if (!decodable) {
+    showToast('The recorded file could not be decoded. Try recording again or select a file.', 'warning');
+  }
   audioPreview.style.display = 'block';
 }
 
@@ -434,6 +492,25 @@ function displayResult(result, message) {
     // try refreshing history silently
     loadHistory().catch(() => {});
   }
+  // Diagnostics panel: show backend hints to aid troubleshooting
+  try {
+    const diag = result && result._diag ? result._diag : null;
+    let diagEl = document.getElementById('diag-panel');
+    if (!diagEl) {
+      diagEl = document.createElement('div');
+      diagEl.id = 'diag-panel';
+      diagEl.style.marginTop = '8px';
+      diagEl.style.fontSize = '12px';
+      diagEl.style.color = 'var(--text-muted, #666)';
+      resultSection && resultSection.appendChild(diagEl);
+    }
+    if (diag) {
+      const usedFallback = diag.used_fallback ? 'yes' : 'no';
+      diagEl.textContent = `Audio: ${diag.content_type || 'unknown'} | duration: ${diag.duration ?? 'n/a'}s | ffmpeg fallback: ${usedFallback}`;
+    } else {
+      diagEl.textContent = '';
+    }
+  } catch {}
 }
 
 // Adaptive Response

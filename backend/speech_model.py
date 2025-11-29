@@ -20,7 +20,7 @@ else:
     except Exception:
         whisper = None
 
-    MODEL_SIZE = os.environ.get("SPEECH_MODEL_SIZE", "small")
+    MODEL_SIZE = os.environ.get("SPEECH_MODEL_SIZE", "tiny")
     SPEECH_LANGUAGE = os.environ.get("SPEECH_LANGUAGE")  # e.g., 'en', 'ur', 'hi'
 
     _model = None
@@ -44,5 +44,6 @@ else:
             opts["language"] = SPEECH_LANGUAGE
         # Temperature range provides diversity fallback
         opts["temperature"] = [0.0, 0.2, 0.4]
+        # Force decoding to mono 16k if needed by letting backend convert; here we focus on robust transcription
         res = model.transcribe(file_path, **opts)
         return res.get('text', '')
