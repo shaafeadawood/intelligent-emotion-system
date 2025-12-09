@@ -152,9 +152,9 @@ async def predict_speech(
                     tmp_in_path = tmp_in.name
                 try:
                     conv_path = tmp_in_path + ".wav"
-                        subprocess.run([
-                            'ffmpeg', '-hide_banner', '-loglevel', 'error', '-nostdin',
-                            '-y', '-i', tmp_in_path, '-ar', '16000', '-ac', '1', '-c:a', 'pcm_s16le', conv_path
+                    subprocess.run([
+                        'ffmpeg', '-hide_banner', '-loglevel', 'error', '-nostdin',
+                        '-y', '-i', tmp_in_path, '-ar', '16000', '-ac', '1', '-c:a', 'pcm_s16le', conv_path
                     ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                     transcript_text = transcribe(conv_path)
                     transcript = (transcript_text or "").strip()
